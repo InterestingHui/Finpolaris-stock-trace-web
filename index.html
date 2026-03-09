@@ -1,0 +1,235 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>股票实盘追踪系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 150px; font-family: monospace; margin: 10px 0; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .flex { display: flex; gap: 20px; }
+        .flex > div { flex: 1; }
+        #chartContainer { margin-top: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📈 股票实盘追踪系统</h1>
+
+    <!-- 输入区域 -->
+    <div class="card">
+        <h2>提交决策</h2>
+        <textarea id="jsonInput" placeholder='请输入JSON格式的决策，例如：
+{
+  "signal_id": 20250306001,
+  "timestamp": "2025-03-06T14:35",
+  "stock_code": "000001.SZ",
+  "action": "buy",
+  "quantity": 1000,
+  "price_type": "open",
+  "confidence": 0.85,
+  "news_source": "某财经新闻"
+}'>{
+  "signal_id": 20250306001,
+  "timestamp": "2025-03-06T14:35",
+  "stock_code": "000001.SZ",
+  "action": "buy",
+  "quantity": 1000,
+  "price_type": "open",
+  "confidence": 0.85,
+  "news_source": "新闻摘要"
+}</textarea>
+        <button onclick="submitSignal()">提交决策</button>
+        <div id="submitResult" style="margin-top:10px;color:green;"></div>
+    </div>
+
+    <!-- 数据展示区域 -->
+    <div class="flex">
+        <!-- 当前持仓 -->
+        <div class="card">
+            <h2>当前持仓</h2>
+            <button onclick="refreshPrices()" style="margin-bottom:10px;">🔄 刷新价格</button>
+            <table id="positionsTable">
+                <thead><tr><th>股票代码</th><th>持股数量</th><th>平均成本</th><th>最新价</th><th>市值</th><th>收益</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 决策记录 -->
+        <div class="card">
+            <h2>最近决策</h2>
+            <table id="signalsTable">
+                <thead><tr><th>signal_id</th><th>时间</th><th>股票</th><th>操作</th><th>数量</th><th>价格类型</th><th>置信度</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 历史曲线 -->
+    <div class="card">
+        <h2>历史市值/收益曲线</h2>
+        <div>
+            <label for="stockSelect">选择股票：</label>
+            <select id="stockSelect" onchange="loadHistoryChart()">
+                <option value="">-- 请选择 --</option>
+            </select>
+        </div>
+        <div id="chartContainer">
+            <canvas id="historyChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 基础URL（根据实际部署调整）
+    const BASE_URL = 'http://localhost:5000';
+
+    // 初始化加载数据
+    window.onload = function() {
+        loadPositions();
+        loadSignals();
+        loadStockOptions();
+    };
+
+    // 提交决策
+    function submitSignal() {
+        const jsonStr = document.getElementById('jsonInput').value;
+        try {
+            const data = JSON.parse(jsonStr);
+            fetch(BASE_URL + '/data_trace', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+                .then(res => res.json())
+                .then(result => {
+                    if (result.error) {
+                        document.getElementById('submitResult').innerHTML = `<span style="color:red">错误: ${result.error}</span>`;
+                    } else {
+                        document.getElementById('submitResult').innerHTML = `<span style="color:green">成功，成交价: ${result.trade_price}</span>`;
+                        // 刷新数据
+                        loadPositions();
+                        loadSignals();
+                        loadStockOptions();
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('submitResult').innerHTML = `<span style="color:red">请求失败: ${err}</span>`;
+                });
+        } catch (e) {
+            document.getElementById('submitResult').innerHTML = `<span style="color:red">JSON格式错误: ${e.message}</span>`;
+        }
+    }
+
+    // 加载当前持仓
+    function loadPositions() {
+        fetch(BASE_URL + '/api/positions')
+            .then(res => res.json())
+            .then(data => {
+                let tbody = document.querySelector('#positionsTable tbody');
+                tbody.innerHTML = '';
+                data.forEach(p => {
+                    let row = tbody.insertRow();
+                    row.insertCell().innerText = p.stock_code;
+                    row.insertCell().innerText = p.quantity;
+                    row.insertCell().innerText = p.avg_cost ? p.avg_cost.toFixed(2) : '-';
+                    row.insertCell().innerText = p.latest_price ? p.latest_price.toFixed(2) : '-';
+                    row.insertCell().innerText = p.market_value ? p.market_value.toFixed(2) : '-';
+                    row.insertCell().innerText = p.profit ? p.profit.toFixed(2) : '-';
+                });
+            });
+    }
+
+    // 加载决策记录
+    function loadSignals() {
+        fetch(BASE_URL + '/api/signals')
+            .then(res => res.json())
+            .then(data => {
+                let tbody = document.querySelector('#signalsTable tbody');
+                tbody.innerHTML = '';
+                data.slice(0, 10).forEach(s => { // 只显示最近10条
+                    let row = tbody.insertRow();
+                    row.insertCell().innerText = s.signal_id;
+                    row.insertCell().innerText = s.timestamp;
+                    row.insertCell().innerText = s.stock_code;
+                    row.insertCell().innerText = s.action;
+                    row.insertCell().innerText = s.quantity;
+                    row.insertCell().innerText = s.price_type;
+                    row.insertCell().innerText = s.confidence;
+                });
+            });
+    }
+
+    // 加载股票选项到下拉框
+    function loadStockOptions() {
+        fetch(BASE_URL + '/api/history')
+            .then(res => res.json())
+            .then(data => {
+                const stocks = [...new Set(data.map(item => item.stock_code))];
+                const select = document.getElementById('stockSelect');
+                select.innerHTML = '<option value="">-- 请选择 --</option>';
+                stocks.forEach(code => {
+                    const option = document.createElement('option');
+                    option.value = code;
+                    option.text = code;
+                    select.appendChild(option);
+                });
+            });
+    }
+
+    let chart = null;
+    function loadHistoryChart() {
+        const stockCode = document.getElementById('stockSelect').value;
+        if (!stockCode) return;
+        fetch(BASE_URL + '/api/history?stock_code=' + stockCode)
+            .then(res => res.json())
+            .then(data => {
+                const times = data.map(d => d.snapshot_time.slice(0,16)); // 截取到分钟
+                const marketValues = data.map(d => d.market_value);
+                const profits = data.map(d => d.profit);
+
+                if (chart) chart.destroy();
+
+                const ctx = document.getElementById('historyChart').getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: times,
+                        datasets: [
+                            { label: '市值', data: marketValues, borderColor: 'blue', fill: false },
+                            { label: '收益', data: profits, borderColor: 'green', fill: false }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: { x: { ticks: { maxTicksLimit: 10 } } }
+                    }
+                });
+            });
+    }
+
+    // 手动刷新价格
+    function refreshPrices() {
+        fetch(BASE_URL + '/api/refresh', { method: 'POST' })
+            .then(res => res.json())
+            .then(result => {
+                if (result.error) {
+                    alert('刷新失败: ' + result.error);
+                } else {
+                    alert('刷新成功');
+                    loadPositions();
+                    loadStockOptions();
+                }
+            });
+    }
+</script>
+</body>
+</html>
