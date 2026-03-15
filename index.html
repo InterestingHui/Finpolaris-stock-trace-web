@@ -1,89 +1,114 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <title>股票实盘追踪系统</title>
+    <title>股票策略追踪系统</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Microsoft YaHei', sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1400px; margin: 0 auto; }
         .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        textarea { width: 100%; height: 150px; font-family: monospace; margin: 10px 0; }
-        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        textarea { width: 100%; height: 200px; font-family: monospace; margin: 10px 0; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #0056b3; }
+        select, input { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .flex { display: flex; gap: 20px; }
+        .flex > div { flex: 1; }
+        #chartContainer { margin-top: 20px; height: 400px; }
         table { border-collapse: collapse; width: 100%; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        .flex { display: flex; gap: 20px; }
-        .flex > div { flex: 1; }
-        #chartContainer { margin-top: 20px; }
+        .error { color: red; }
+        .success { color: green; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>📈 股票实盘追踪系统</h1>
+    <h1>📊 股票策略追踪系统</h1>
 
     <!-- 输入区域 -->
     <div class="card">
-        <h2>提交决策</h2>
-        <textarea id="jsonInput" placeholder='请输入JSON格式的决策，例如：
-{
-  "signal_id": 20250306001,
-  "timestamp": "2025-03-06T14:35",
-  "stock_code": "000001.SZ",
-  "action": "buy",
-  "quantity": 1000,
-  "price_type": "open",
-  "confidence": 0.85,
-  "news_source": "某财经新闻"
-}'>{
-  "signal_id": 20250306001,
-  "timestamp": "2025-03-06T14:35",
-  "stock_code": "000001.SZ",
-  "action": "buy",
-  "quantity": 1000,
-  "price_type": "open",
-  "confidence": 0.85,
-  "news_source": "新闻摘要"
-}</textarea>
-        <button onclick="submitSignal()">提交决策</button>
-        <div id="submitResult" style="margin-top:10px;color:green;"></div>
+        <h2>提交策略交易</h2>
+        <textarea id="strategiesInput" placeholder='请输入JSON数组，例如：
+[
+  {
+    "strategy_id": "strategy_001",
+    "initial_capital": 1000000,
+    "stocks": [
+      {
+        "stock_code": "000001.SZ",
+        "action": "buy",
+        "quantity": 1000,
+        "price_type": "open",
+        "date": "2025-03-06"
+      }
+    ]
+  }
+]'>[
+  {
+    "strategy_id": "strategy_001",
+    "initial_capital": 1000000,
+    "stocks": [
+      {
+        "stock_code": "000001.SZ",
+        "action": "buy",
+        "quantity": 1000,
+        "price_type": "open",
+        "date": "2025-03-06"
+      }
+    ]
+  }
+]</textarea>
+        <button onclick="submitStrategies()">提交策略</button>
+        <span id="submitResult"></span>
     </div>
 
-    <!-- 数据展示区域 -->
-    <div class="flex">
-        <!-- 当前持仓 -->
-        <div class="card">
-            <h2>当前持仓</h2>
-            <button onclick="refreshPrices()" style="margin-bottom:10px;">🔄 刷新价格</button>
-            <table id="positionsTable">
-                <thead><tr><th>股票代码</th><th>持股数量</th><th>平均成本</th><th>最新价</th><th>市值</th><th>收益</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-
-        <!-- 决策记录 -->
-        <div class="card">
-            <h2>最近决策</h2>
-            <table id="signalsTable">
-                <thead><tr><th>signal_id</th><th>时间</th><th>股票</th><th>操作</th><th>数量</th><th>价格类型</th><th>置信度</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 历史曲线 -->
+    <!-- 策略选择 -->
     <div class="card">
-        <h2>历史市值/收益曲线</h2>
-        <div>
-            <label for="stockSelect">选择股票：</label>
-            <select id="stockSelect" onchange="loadHistoryChart()">
-                <option value="">-- 请选择 --</option>
-            </select>
+        <h2>策略净值分析</h2>
+        <label for="strategySelect">选择策略:</label>
+        <select id="strategySelect" onchange="loadStrategyNav()">
+            <option value="">-- 请选择 --</option>
+        </select>
+        <button onclick="refreshStrategyList()">刷新列表</button>
+        <button onclick="deleteSelectedStrategy()" style="background-color: #dc3545;">删除策略</button>
+        <div id="currentNav"></div>
+        <div id="navChartContainer">
+            <canvas id="navChart"></canvas>
         </div>
-        <div id="chartContainer">
-            <canvas id="historyChart"></canvas>
+    </div>
+
+    <!-- 股票当前净值 -->
+    <div class="card">
+        <h2>股票当前净值</h2>
+        <div>
+            <label for="stockListInput">输入股票代码 (逗号分隔):</label>
+            <input type="text" id="stockListInput" placeholder="000001.SZ,000002.SZ">
+            <button onclick="loadStockNav()">查询</button>
+        </div>
+        <table id="stockNavTable">
+            <thead><tr><th>股票代码</th><th>当前净值</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <!-- 沪深300波动曲线 -->
+    <div class="card">
+        <h2>沪深300指数波动</h2>
+        <div>
+            <label for="indexStart">起始日期:</label>
+            <input type="date" id="indexStart" value="2025-03-01">
+            <label for="indexEnd">结束日期:</label>
+            <input type="date" id="indexEnd" value="2025-03-10">
+            <label for="indexPriceType">价格类型:</label>
+            <select id="indexPriceType">
+                <option value="open">开盘价</option>
+                <option value="close" selected>收盘价</option>
+            </select>
+            <button onclick="loadIndexChart()">查询</button>
+        </div>
+        <div id="indexChartContainer">
+            <canvas id="indexChart"></canvas>
         </div>
     </div>
 </div>
@@ -92,19 +117,17 @@
     // 基础URL（根据实际部署调整）
     const BASE_URL = 'http://localhost:5000';
 
-    // 初始化加载数据
+    // 初始化加载策略列表
     window.onload = function() {
-        loadPositions();
-        loadSignals();
-        loadStockOptions();
+        refreshStrategyList();
     };
 
-    // 提交决策
-    function submitSignal() {
-        const jsonStr = document.getElementById('jsonInput').value;
+    // 提交策略
+    function submitStrategies() {
+        const input = document.getElementById('strategiesInput').value;
         try {
-            const data = JSON.parse(jsonStr);
-            fetch(BASE_URL + '/data_trace', {
+            const data = JSON.parse(input);
+            fetch(BASE_URL + '/api/strategies', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -112,122 +135,180 @@
                 .then(res => res.json())
                 .then(result => {
                     if (result.error) {
-                        document.getElementById('submitResult').innerHTML = `<span style="color:red">错误: ${result.error}</span>`;
+                        document.getElementById('submitResult').innerHTML = `<span class="error">错误: ${result.error}</span>`;
                     } else {
-                        document.getElementById('submitResult').innerHTML = `<span style="color:green">成功，成交价: ${result.trade_price}</span>`;
-                        // 刷新数据
-                        loadPositions();
-                        loadSignals();
-                        loadStockOptions();
+                        document.getElementById('submitResult').innerHTML = `<span class="success">提交成功</span>`;
+                        refreshStrategyList();
                     }
                 })
                 .catch(err => {
-                    document.getElementById('submitResult').innerHTML = `<span style="color:red">请求失败: ${err}</span>`;
+                    document.getElementById('submitResult').innerHTML = `<span class="error">请求失败: ${err}</span>`;
                 });
         } catch (e) {
-            document.getElementById('submitResult').innerHTML = `<span style="color:red">JSON格式错误: ${e.message}</span>`;
+            document.getElementById('submitResult').innerHTML = `<span class="error">JSON格式错误: ${e.message}</span>`;
         }
     }
 
-    // 加载当前持仓
-    function loadPositions() {
-        fetch(BASE_URL + '/api/positions')
+    // 刷新策略列表
+    function refreshStrategyList() {
+        fetch(BASE_URL + '/api/strategies')
             .then(res => res.json())
             .then(data => {
-                let tbody = document.querySelector('#positionsTable tbody');
-                tbody.innerHTML = '';
-                data.forEach(p => {
-                    let row = tbody.insertRow();
-                    row.insertCell().innerText = p.stock_code;
-                    row.insertCell().innerText = p.quantity;
-                    row.insertCell().innerText = p.avg_cost ? p.avg_cost.toFixed(2) : '-';
-                    row.insertCell().innerText = p.latest_price ? p.latest_price.toFixed(2) : '-';
-                    row.insertCell().innerText = p.market_value ? p.market_value.toFixed(2) : '-';
-                    row.insertCell().innerText = p.profit ? p.profit.toFixed(2) : '-';
-                });
-            });
-    }
-
-    // 加载决策记录
-    function loadSignals() {
-        fetch(BASE_URL + '/api/signals')
-            .then(res => res.json())
-            .then(data => {
-                let tbody = document.querySelector('#signalsTable tbody');
-                tbody.innerHTML = '';
-                data.slice(0, 10).forEach(s => { // 只显示最近10条
-                    let row = tbody.insertRow();
-                    row.insertCell().innerText = s.signal_id;
-                    row.insertCell().innerText = s.timestamp;
-                    row.insertCell().innerText = s.stock_code;
-                    row.insertCell().innerText = s.action;
-                    row.insertCell().innerText = s.quantity;
-                    row.insertCell().innerText = s.price_type;
-                    row.insertCell().innerText = s.confidence;
-                });
-            });
-    }
-
-    // 加载股票选项到下拉框
-    function loadStockOptions() {
-        fetch(BASE_URL + '/api/history')
-            .then(res => res.json())
-            .then(data => {
-                const stocks = [...new Set(data.map(item => item.stock_code))];
-                const select = document.getElementById('stockSelect');
+                const select = document.getElementById('strategySelect');
                 select.innerHTML = '<option value="">-- 请选择 --</option>';
-                stocks.forEach(code => {
-                    const option = document.createElement('option');
-                    option.value = code;
-                    option.text = code;
-                    select.appendChild(option);
+                data.forEach(sid => {
+                    const opt = document.createElement('option');
+                    opt.value = sid;
+                    opt.text = sid;
+                    select.appendChild(opt);
                 });
             });
     }
 
-    let chart = null;
-    function loadHistoryChart() {
-        const stockCode = document.getElementById('stockSelect').value;
-        if (!stockCode) return;
-        fetch(BASE_URL + '/api/history?stock_code=' + stockCode)
+    let navChart = null;
+    function loadStrategyNav() {
+        const strategyId = document.getElementById('strategySelect').value;
+        if (!strategyId) return;
+
+        // 获取当前总净值
+        fetch(BASE_URL + `/api/strategies/${strategyId}/nav?price_type=open`)
             .then(res => res.json())
             .then(data => {
-                const times = data.map(d => d.snapshot_time.slice(0,16)); // 截取到分钟
-                const marketValues = data.map(d => d.market_value);
-                const profits = data.map(d => d.profit);
+                if (data.error) {
+                    document.getElementById('currentNav').innerHTML = `<span class="error">${data.error}</span>`;
+                    return;
+                }
+                document.getElementById('currentNav').innerHTML = `
+            <p>当前总净值: ${data.total_nav.toFixed(2)} (${data.nav_percent}%)</p>
+        `;
+            });
 
-                if (chart) chart.destroy();
+        // 获取历史净值
+        fetch(BASE_URL + `/api/strategies/${strategyId}/nav?price_type=close`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                const dates = data.map(d => d.date);
+                const percents = data.map(d => d.nav_percent);
 
-                const ctx = document.getElementById('historyChart').getContext('2d');
-                chart = new Chart(ctx, {
+                if (navChart) navChart.destroy();
+                const ctx = document.getElementById('navChart').getContext('2d');
+                navChart = new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: times,
-                        datasets: [
-                            { label: '市值', data: marketValues, borderColor: 'blue', fill: false },
-                            { label: '收益', data: profits, borderColor: 'green', fill: false }
-                        ]
+                        labels: dates,
+                        datasets: [{
+                            label: '净值百分比 (%)',
+                            data: percents,
+                            borderColor: 'blue',
+                            fill: false
+                        }]
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         scales: { x: { ticks: { maxTicksLimit: 10 } } }
                     }
                 });
             });
     }
 
-    // 手动刷新价格
-    function refreshPrices() {
-        fetch(BASE_URL + '/api/refresh', { method: 'POST' })
+    // 查询股票当前净值
+    function loadStockNav() {
+        const strategyId = document.getElementById('strategySelect').value;
+        if (!strategyId) {
+            alert('请先选择策略');
+            return;
+        }
+        const stocksInput = document.getElementById('stockListInput').value;
+        if (!stocksInput) return;
+        const stocks = stocksInput.split(',').map(s => s.trim());
+
+        fetch(BASE_URL + `/api/strategies/${strategyId}/current_nav?stocks=${stocks.join(',')}`)
             .then(res => res.json())
-            .then(result => {
-                if (result.error) {
-                    alert('刷新失败: ' + result.error);
-                } else {
-                    alert('刷新成功');
-                    loadPositions();
-                    loadStockOptions();
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
                 }
+                const tbody = document.querySelector('#stockNavTable tbody');
+                tbody.innerHTML = '';
+                data.forEach(item => {
+                    const row = tbody.insertRow();
+                    row.insertCell().innerText = item.stock_code;
+                    row.insertCell().innerText = item.nav.toFixed(2);
+                });
+            });
+    }
+
+    let indexChart = null;
+    function loadIndexChart() {
+        const start = document.getElementById('indexStart').value;
+        const end = document.getElementById('indexEnd').value;
+        const priceType = document.getElementById('indexPriceType').value;
+        if (!start || !end) return;
+
+        fetch(BASE_URL + `/api/index/sh000300?start_date=${start}&end_date=${end}&price_type=${priceType}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                const dates = data.map(d => d.date);
+                const percents = data.map(d => d.percent_change);
+
+                if (indexChart) indexChart.destroy();
+                const ctx = document.getElementById('indexChart').getContext('2d');
+                indexChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [{
+                            label: '沪深300 百分比变化 (%)',
+                            data: percents,
+                            borderColor: 'green',
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            });
+    }
+
+    function deleteSelectedStrategy() {
+        const strategyId = document.getElementById('strategySelect').value;
+        if (!strategyId) {
+            alert('请先选择策略');
+            return;
+        }
+        if (!confirm(`确定要删除策略 ${strategyId} 及其所有交易记录吗？`)) {
+            return;
+        }
+        fetch(BASE_URL + `/api/strategies/${strategyId}`, {
+            method: 'DELETE'
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert('删除失败: ' + data.error);
+                } else {
+                    alert('删除成功');
+                    refreshStrategyList();                 // 刷新下拉列表
+                    document.getElementById('strategySelect').value = '';
+                    if (navChart) navChart.destroy();      // 清空图表
+                    navChart = null;
+                    document.getElementById('currentNav').innerHTML = '';
+                }
+            })
+            .catch(err => {
+                alert('请求失败: ' + err);
             });
     }
 </script>
