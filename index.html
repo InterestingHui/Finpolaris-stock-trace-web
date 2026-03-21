@@ -23,6 +23,9 @@
         .error { color: red; }
         .success { color: green; }
         .info-panel { margin-top: 20px; }
+        .status-badge { padding: 3px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold; }
+        .status-success { background: #d4edda; color: #155724; }
+        .status-failed { background: #f8d7da; color: #721c24; }
     </style>
 </head>
 <body>
@@ -48,14 +51,13 @@
   }
 ]'>[
   {
-    "strategy_id": "strategy_001",
-    "initial_capital": 1000000,
+    "strategy_id": "strategy_003",
     "stocks": [
       {
-        "stock_code": "000001.SZ",
+        "stock_code": "000002.SZ",
         "action": "buy",
-        "quantity": 1000,
-        "date": "2025-03-06"
+        "quantity": 2000,
+        "date": "2026-01-01"
       }
     ]
   }
@@ -80,21 +82,32 @@
         </div>
     </div>
 
-    <!-- 点击图表后显示的持仓快照 -->
+    <!-- 点击图表后显示的持仓快照（含现金） -->
     <div class="card" id="snapshotPanel" style="display:none;">
         <h3>持仓快照 <span id="snapshotDate"></span> (开盘价)</h3>
-        <div>策略净值: <span id="snapshotNav"></span> (<span id="snapshotPercent"></span>%)</div>
+        <div>现金: <span id="snapshotCash"></span> | 策略净值: <span id="snapshotNav"></span> (<span id="snapshotPercent"></span>%)</div>
         <table id="snapshotTable">
             <thead><tr><th>股票代码</th><th>持股数量</th><th>开盘价</th><th>市值</th></tr></thead>
             <tbody></tbody>
         </table>
     </div>
 
-    <!-- 交易记录（无日期筛选） -->
+    <!-- 交易日志（成功+失败） -->
     <div class="card">
-        <h2>交易记录</h2>
-        <table id="tradesTable">
-            <thead><tr><th>日期</th><th>股票代码</th><th>操作</th><th>数量</th><th>价格</th><th>成交额</th></tr></thead>
+        <h2>交易日志</h2>
+        <table id="logsTable">
+            <thead>
+            <tr>
+                <th>意图日期</th>
+                <th>实际日期</th>
+                <th>股票代码</th>
+                <th>操作</th>
+                <th>数量</th>
+                <th>价格</th>
+                <th>状态</th>
+                <th>原因</th>
+            </tr>
+            </thead>
             <tbody></tbody>
         </table>
     </div>
@@ -134,12 +147,12 @@
             navChart = null;
             document.getElementById('currentNav').innerHTML = '';
             document.getElementById('snapshotPanel').style.display = 'none';
-            document.getElementById('tradesTable').querySelector('tbody').innerHTML = '';
+            document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
             return;
         }
         currentStrategyId = strategyId;
         loadStrategyNav();
-        loadAllTrades();  // 直接加载所有交易
+        loadTradeLogs();
     }
 
     // ========== 提交策略 ==========
@@ -159,6 +172,11 @@
                     } else {
                         document.getElementById('submitResult').innerHTML = `<span class="success">提交成功</span>`;
                         refreshStrategyList();
+                        // 如果当前选中的策略与刚提交的策略相同，则刷新日志
+                        const select = document.getElementById('strategySelect');
+                        if (select.value === data[0]?.strategy_id) {
+                            loadTradeLogs();
+                        }
                     }
                 })
                 .catch(err => {
@@ -191,7 +209,7 @@
                     navChart = null;
                     document.getElementById('currentNav').innerHTML = '';
                     document.getElementById('snapshotPanel').style.display = 'none';
-                    document.getElementById('tradesTable').querySelector('tbody').innerHTML = '';
+                    document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
                 }
             })
             .catch(err => alert('请求失败: ' + err));
@@ -314,8 +332,9 @@
                     return;
                 }
                 document.getElementById('snapshotPanel').style.display = 'block';
-                document.getElementById('snapshotDate').innerText = date;
+                document.getElementById('snapshotDate').innerText = data.date;
 
+                document.getElementById('snapshotCash').innerText = data.cash ? data.cash.toFixed(2) : '-';
                 document.getElementById('snapshotNav').innerText = data.nav ? data.nav.toFixed(2) : '-';
                 document.getElementById('snapshotPercent').innerText = data.nav_percent ? data.nav_percent.toFixed(2) : '-';
 
@@ -336,49 +355,41 @@
             .catch(err => console.error('获取持仓快照失败', err));
     }
 
-    function loadAllTrades() {
+    // ========== 加载交易日志 ==========
+    function loadTradeLogs() {
         if (!currentStrategyId) return;
-        const url = BASE_URL + '/api/strategies/' + currentStrategyId + '/trades';
-        console.log('请求交易记录 URL:', url);
-        fetch(url)
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/logs')
             .then(res => res.json())
             .then(data => {
-                console.log('后端返回数据:', data);
                 if (data.error) {
-                    alert('获取交易记录失败: ' + data.error);
+                    alert('获取交易日志失败: ' + data.error);
                     return;
                 }
-                const tbody = document.querySelector('#tradesTable tbody');
-                if (!tbody) {
-                    console.error('未找到 tbody 元素');
-                    return;
-                }
+                const tbody = document.querySelector('#logsTable tbody');
                 tbody.innerHTML = '';
                 if (!Array.isArray(data) || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6">暂无交易记录</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8">暂无交易日志</td></tr>';
                     return;
                 }
-                console.log('数据条数:', data.length);
-                data.forEach((t, idx) => {
-                    console.log(`正在插入第 ${idx+1} 条:`, t);
+                data.forEach(log => {
                     const row = tbody.insertRow();
-                    row.insertCell().innerText = t.trade_date || '';
-                    row.insertCell().innerText = t.stock_code || '';
-                    row.insertCell().innerText = t.action || '';
-                    row.insertCell().innerText = t.quantity !== undefined ? t.quantity : '';
+                    row.insertCell().innerText = log.intended_date || '';
+                    row.insertCell().innerText = log.actual_date || '-';
+                    row.insertCell().innerText = log.stock_code || '';
+                    row.insertCell().innerText = log.action || '';
+                    row.insertCell().innerText = log.quantity || '';
 
-                    // 安全处理价格：转换为浮点数，若无效则显示空
-                    const price = parseFloat(t.price);
-                    const priceStr = isNaN(price) ? '' : price.toFixed(2);
-                    row.insertCell().innerText = priceStr;
+                    const price = parseFloat(log.price);
+                    row.insertCell().innerText = isNaN(price) ? '-' : price.toFixed(2);
 
-                    // 计算成交额：需要数量和价格都是有效数字
-                    const qty = parseFloat(t.quantity);
-                    const amountStr = (!isNaN(qty) && !isNaN(price)) ? (qty * price).toFixed(2) : '';
-                    row.insertCell().innerText = amountStr;
+                    const status = log.status || '';
+                    const statusClass = status === 'success' ? 'status-success' : 'status-failed';
+                    row.insertCell().innerHTML = `<span class="status-badge ${statusClass}">${status}</span>`;
+
+                    row.insertCell().innerText = log.fail_reason || '-';
                 });
             })
-            .catch(err => console.error('获取交易记录失败', err));
+            .catch(err => console.error('获取交易日志失败', err));
     }
 </script>
 </body>
