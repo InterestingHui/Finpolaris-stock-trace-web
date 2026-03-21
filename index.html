@@ -26,6 +26,7 @@
         .status-badge { padding: 3px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold; }
         .status-success { background: #d4edda; color: #155724; }
         .status-failed { background: #f8d7da; color: #721c24; }
+        .status-pending { background: #fff3cd; color: #856404; }
     </style>
 </head>
 <body>
@@ -45,19 +46,20 @@
         "stock_code": "000001.SZ",
         "action": "buy",
         "quantity": 1000,
-        "date": "2025-03-06"
+        "date": "2026-03-06"
       }
     ]
   }
 ]'>[
   {
-    "strategy_id": "strategy_003",
+    "strategy_id": "strategy_001",
+    "initial_capital": 1000000,
     "stocks": [
       {
-        "stock_code": "000002.SZ",
+        "stock_code": "000001.SZ",
         "action": "buy",
-        "quantity": 2000,
-        "date": "2026-01-01"
+        "quantity": 1000,
+        "date": "2026-03-06"
       }
     ]
   }
@@ -82,12 +84,32 @@
         </div>
     </div>
 
-    <!-- 点击图表后显示的持仓快照（含现金） -->
+    <!-- 点击图表后显示的持仓快照（含现金和预购股） -->
     <div class="card" id="snapshotPanel" style="display:none;">
         <h3>持仓快照 <span id="snapshotDate"></span> (开盘价)</h3>
         <div>现金: <span id="snapshotCash"></span> | 策略净值: <span id="snapshotNav"></span> (<span id="snapshotPercent"></span>%)</div>
+        <h4>当前持仓</h4>
         <table id="snapshotTable">
-            <thead><tr><th>股票代码</th><th>持股数量</th><th>开盘价</th><th>市值</th></tr></thead>
+            <thead>
+            <tr>
+                <th>股票代码</th>
+                <th>持股数量</th>
+                <th>开盘价</th>
+                <th>市值</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <h4>预购股（下一个交易日 <span id="pendingDate"></span> 执行）</h4>
+        <table id="pendingTable">
+            <thead>
+            <tr>
+                <th>股票代码</th>
+                <th>操作</th>
+                <th>数量</th>
+                <th>意图日期</th>
+            </tr>
+            </thead>
             <tbody></tbody>
         </table>
     </div>
@@ -235,7 +257,10 @@
             .then(res => res.json())
             .then(data => {
                 if (data.error || data.length === 0) {
-                    alert('无净值数据');
+                    console.warn('无净值数据');
+                    document.getElementById('currentNav').innerHTML += '<p>暂无净值数据</p>';
+                    if (navChart) navChart.destroy();
+                    navChart = null;
                     return;
                 }
                 const navDates = data.map(d => d.date);
@@ -338,18 +363,36 @@
                 document.getElementById('snapshotNav').innerText = data.nav ? data.nav.toFixed(2) : '-';
                 document.getElementById('snapshotPercent').innerText = data.nav_percent ? data.nav_percent.toFixed(2) : '-';
 
-                const tbody = document.querySelector('#snapshotTable tbody');
-                tbody.innerHTML = '';
+                // 填充持仓表格
+                const holdingsTbody = document.querySelector('#snapshotTable tbody');
+                holdingsTbody.innerHTML = '';
                 if (data.holdings && data.holdings.length > 0) {
                     data.holdings.forEach(h => {
-                        const row = tbody.insertRow();
+                        const row = holdingsTbody.insertRow();
                         row.insertCell().innerText = h.stock_code;
                         row.insertCell().innerText = h.quantity;
                         row.insertCell().innerText = h.price ? h.price.toFixed(2) : '-';
                         row.insertCell().innerText = h.market_value ? h.market_value.toFixed(2) : '-';
                     });
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="4">无持仓</td></tr>';
+                    holdingsTbody.innerHTML = '<tr><td colspan="4">无持仓</td></tr>';
+                }
+
+                // 填充预购股表格
+                const pendingTbody = document.querySelector('#pendingTable tbody');
+                pendingTbody.innerHTML = '';
+                if (data.pending_orders && data.pending_orders.length > 0) {
+                    document.getElementById('pendingDate').innerText = data.pending_orders[0].target_date;
+                    data.pending_orders.forEach(p => {
+                        const row = pendingTbody.insertRow();
+                        row.insertCell().innerText = p.stock_code;
+                        row.insertCell().innerText = p.action;
+                        row.insertCell().innerText = p.quantity;
+                        row.insertCell().innerText = p.intended_date || '-';
+                    });
+                } else {
+                    document.getElementById('pendingDate').innerText = '';
+                    pendingTbody.innerHTML = '<tr><td colspan="4">无预购股</td></tr>';
                 }
             })
             .catch(err => console.error('获取持仓快照失败', err));
@@ -383,7 +426,10 @@
                     row.insertCell().innerText = isNaN(price) ? '-' : price.toFixed(2);
 
                     const status = log.status || '';
-                    const statusClass = status === 'success' ? 'status-success' : 'status-failed';
+                    let statusClass = '';
+                    if (status === 'success') statusClass = 'status-success';
+                    else if (status === 'failed') statusClass = 'status-failed';
+                    else if (status === 'pending') statusClass = 'status-pending';
                     row.insertCell().innerHTML = `<span class="status-badge ${statusClass}">${status}</span>`;
 
                     row.insertCell().innerText = log.fail_reason || '-';
