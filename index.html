@@ -16,13 +16,15 @@
         select, input { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
         .flex { display: flex; gap: 20px; }
         .flex > div { flex: 1; }
-        #chartContainer { margin-top: 20px; height: 400px; position: relative; }
+        #chartContainer { position: relative; margin-top: 20px; height: 400px; }
+        #navChartCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #overlayCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        #clickOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; cursor: crosshair; }
         table { border-collapse: collapse; width: 100%; margin-top: 10px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
         .error { color: red; }
         .success { color: green; }
-        .info-panel { margin-top: 20px; }
         .status-badge { padding: 3px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold; }
         .status-success { background: #d4edda; color: #155724; }
         .status-failed { background: #f8d7da; color: #721c24; }
@@ -75,18 +77,24 @@
             <select id="strategySelect" onchange="onStrategyChange()">
                 <option value="">-- 请选择 --</option>
             </select>
+            <select id="navPriceType" onchange="loadStrategyNav()">
+                <option value="open">开盘价</option>
+                <option value="close">收盘价</option>
+            </select>
             <button onclick="refreshStrategyList()">刷新列表</button>
             <button class="btn-danger" onclick="deleteSelectedStrategy()">删除策略</button>
         </div>
         <div id="currentNav" style="margin-top:10px;"></div>
         <div id="chartContainer">
-            <canvas id="navChart"></canvas>
+            <canvas id="navChartCanvas"></canvas>
+            <canvas id="overlayCanvas"></canvas>
+            <div id="clickOverlay"></div>
         </div>
     </div>
 
     <!-- 点击图表后显示的持仓快照（含现金和预购股） -->
     <div class="card" id="snapshotPanel" style="display:none;">
-        <h3>持仓快照 <span id="snapshotDate"></span> (开盘价)</h3>
+        <h3>持仓快照 <span id="snapshotDate"></span> (收盘后)</h3>
         <div>现金: <span id="snapshotCash"></span> | 策略净值: <span id="snapshotNav"></span> (<span id="snapshotPercent"></span>%)</div>
         <h4>当前持仓</h4>
         <table id="snapshotTable">
@@ -95,7 +103,9 @@
                 <th>股票代码</th>
                 <th>持股数量</th>
                 <th>开盘价</th>
-                <th>市值</th>
+                <th>开盘市值</th>
+                <th>收盘价</th>
+                <th>收盘市值</th>
             </tr>
             </thead>
             <tbody></tbody>
@@ -140,10 +150,112 @@
 
     let navChart = null;
     let currentStrategyId = null;
+    let currentChartLabels = []; // 保存当前图表的横坐标标签
+    let currentNavValues = [];    // 保存净值金额
+    let currentIndexValues = [];   // 保存沪深300指数值
+
+    // 用于绘制垂直虚线的变量
+    let overlayCanvas = null;
+    let overlayCtx = null;
+    let lastX = null;
+    let rafId = null;
 
     window.onload = function() {
         refreshStrategyList();
+        // 获取 canvas 元素
+        overlayCanvas = document.getElementById('overlayCanvas');
+        overlayCtx = overlayCanvas.getContext('2d');
+        // 设置点击区域的事件
+        const clickOverlay = document.getElementById('clickOverlay');
+        clickOverlay.addEventListener('click', (e) => {
+            if (!navChart || !currentChartLabels.length) return;
+            const rect = clickOverlay.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            // 找到最近的横坐标点
+            const { index } = getNearestPoint(x, y);
+            if (index >= 0 && index < currentChartLabels.length) {
+                loadSnapshot(currentChartLabels[index]);
+            }
+        });
+        // 鼠标移动时绘制虚线
+        clickOverlay.addEventListener('mousemove', (e) => {
+            if (!navChart || !currentChartLabels.length) return;
+            const rect = clickOverlay.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const { xPos } = getNearestPoint(x, y);
+            drawVerticalLine(xPos);
+        });
+        clickOverlay.addEventListener('mouseleave', () => {
+            clearVerticalLine();
+        });
     };
+
+    // 获取鼠标位置最近的横坐标点信息
+    function getNearestPoint(clickX, clickY) {
+        if (!navChart || !currentChartLabels.length) return { index: -1, xPos: 0 };
+        const chartArea = navChart.chartArea;
+        const xAxis = navChart.scales.x;
+        // 计算每个标签的x坐标
+        const labelPositions = [];
+        for (let i = 0; i < currentChartLabels.length; i++) {
+            const xPos = xAxis.getPixelForValue(i);
+            labelPositions.push({ index: i, x: xPos });
+        }
+        // 找到离 clickX 最近的标签
+        let nearest = null;
+        let minDist = Infinity;
+        for (let pos of labelPositions) {
+            const dist = Math.abs(pos.x - clickX);
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = pos;
+            }
+        }
+        return { index: nearest.index, xPos: nearest.x };
+    }
+
+    // 绘制垂直虚线
+    function drawVerticalLine(x) {
+        if (!overlayCanvas || !overlayCtx) return;
+        if (x === lastX) return;
+        lastX = x;
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+            const width = overlayCanvas.width;
+            const height = overlayCanvas.height;
+            overlayCtx.clearRect(0, 0, width, height);
+            if (x > 0 && x < width) {
+                overlayCtx.beginPath();
+                overlayCtx.moveTo(x, 0);
+                overlayCtx.lineTo(x, height);
+                overlayCtx.strokeStyle = 'rgba(0,0,0,0.5)';
+                overlayCtx.setLineDash([5, 5]);
+                overlayCtx.stroke();
+                overlayCtx.setLineDash([]);
+            }
+            rafId = null;
+        });
+    }
+
+    function clearVerticalLine() {
+        if (overlayCtx && overlayCanvas) {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        }
+        lastX = null;
+    }
+
+    // 调整 overlayCanvas 尺寸与图表 canvas 一致
+    function resizeOverlay() {
+        const chartCanvas = document.getElementById('navChartCanvas');
+        if (chartCanvas && overlayCanvas) {
+            overlayCanvas.width = chartCanvas.width;
+            overlayCanvas.height = chartCanvas.height;
+            overlayCanvas.style.width = chartCanvas.style.width;
+            overlayCanvas.style.height = chartCanvas.style.height;
+        }
+    }
 
     // ========== 策略管理 ==========
     function refreshStrategyList() {
@@ -165,14 +277,21 @@
     function onStrategyChange() {
         const strategyId = document.getElementById('strategySelect').value;
         if (!strategyId) {
+            // 清空图表和快照面板
             if (navChart) navChart.destroy();
             navChart = null;
             document.getElementById('currentNav').innerHTML = '';
             document.getElementById('snapshotPanel').style.display = 'none';
             document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
+            currentChartLabels = [];
+            currentNavValues = [];
+            currentIndexValues = [];
+            clearVerticalLine();
             return;
         }
         currentStrategyId = strategyId;
+        // 清空快照面板
+        document.getElementById('snapshotPanel').style.display = 'none';
         loadStrategyNav();
         loadTradeLogs();
     }
@@ -194,7 +313,6 @@
                     } else {
                         document.getElementById('submitResult').innerHTML = `<span class="success">提交成功</span>`;
                         refreshStrategyList();
-                        // 如果当前选中的策略与刚提交的策略相同，则刷新日志
                         const select = document.getElementById('strategySelect');
                         if (select.value === data[0]?.strategy_id) {
                             loadTradeLogs();
@@ -232,6 +350,10 @@
                     document.getElementById('currentNav').innerHTML = '';
                     document.getElementById('snapshotPanel').style.display = 'none';
                     document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
+                    currentChartLabels = [];
+                    currentNavValues = [];
+                    currentIndexValues = [];
+                    clearVerticalLine();
                 }
             })
             .catch(err => alert('请求失败: ' + err));
@@ -241,7 +363,10 @@
     function loadStrategyNav() {
         if (!currentStrategyId) return;
 
-        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/current_nav')
+        const priceType = document.getElementById('navPriceType').value;
+
+        // 请求当前净值时传递 price_type
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/current_nav?price_type=' + priceType)
             .then(res => res.json())
             .then(data => {
                 if (data.error) {
@@ -253,7 +378,7 @@
             `;
             });
 
-        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/nav?price_type=open')
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/nav?price_type=' + priceType)
             .then(res => res.json())
             .then(data => {
                 if (data.error || data.length === 0) {
@@ -265,34 +390,43 @@
                 }
                 const navDates = data.map(d => d.date);
                 const navPercents = data.map(d => d.nav_percent);
+                const navValues = data.map(d => d.nav);
+                currentChartLabels = navDates;
+                currentNavValues = navValues;
 
                 const startDate = navDates[0];
                 const endDate = navDates[navDates.length - 1];
-                fetch(BASE_URL + '/api/index/sh000300?start_date=' + startDate + '&end_date=' + endDate + '&price_type=open')
+                fetch(BASE_URL + '/api/index/sh000300?start_date=' + startDate + '&end_date=' + endDate + '&price_type=' + priceType)
                     .then(res => res.json())
                     .then(indexData => {
                         if (indexData.error) {
                             console.warn('沪深300数据获取失败', indexData.error);
-                            drawChart(navDates, navPercents, []);
+                            drawChart(navDates, navPercents, [], navValues, []);
                         } else {
                             const indexMap = new Map();
-                            indexData.forEach(item => indexMap.set(item.date, item.percent_change));
+                            const indexValuesMap = new Map();
+                            indexData.forEach(item => {
+                                indexMap.set(item.date, item.percent_change);
+                                indexValuesMap.set(item.date, item.value);
+                            });
                             const indexPercents = navDates.map(date => indexMap.get(date) || null);
-                            drawChart(navDates, navPercents, indexPercents);
+                            const indexValues = navDates.map(date => indexValuesMap.get(date) || null);
+                            currentIndexValues = indexValues;
+                            drawChart(navDates, navPercents, indexPercents, navValues, indexValues);
                         }
                     })
                     .catch(err => {
                         console.error('沪深300请求失败', err);
-                        drawChart(navDates, navPercents, []);
+                        drawChart(navDates, navPercents, [], navValues, []);
                     });
             })
             .catch(err => console.error('净值请求失败', err));
     }
 
-    function drawChart(labels, strategyData, indexData) {
+    function drawChart(labels, strategyData, indexData, navValues, indexValues) {
         if (navChart) navChart.destroy();
 
-        const ctx = document.getElementById('navChart').getContext('2d');
+        const ctx = document.getElementById('navChartCanvas').getContext('2d');
         const datasets = [
             {
                 label: '策略净值 (%)',
@@ -329,6 +463,17 @@
                                 if (label) label += ': ';
                                 if (context.raw !== null && context.raw !== undefined) {
                                     label += context.raw.toFixed(2) + '%';
+                                    if (context.dataset.label === '策略净值 (%)') {
+                                        const index = context.dataIndex;
+                                        if (navValues && navValues[index]) {
+                                            label += ` (净值: ${navValues[index].toFixed(2)})`;
+                                        }
+                                    } else if (context.dataset.label === '沪深300 (%)') {
+                                        const index = context.dataIndex;
+                                        if (indexValues && indexValues[index]) {
+                                            label += ` (指数: ${indexValues[index].toFixed(2)})`;
+                                        }
+                                    }
                                 }
                                 return label;
                             }
@@ -336,24 +481,27 @@
                     }
                 },
                 onClick: (event, items) => {
-                    if (items.length > 0) {
-                        const index = items[0].index;
-                        const date = labels[index];
-                        loadSnapshot(date);
-                    }
+                    // 保留点击图例等默认行为，但不再用点击图表显示快照（由 clickOverlay 处理）
                 }
             }
         });
+
+        // 图表绘制完成后调整 overlayCanvas 尺寸并清除虚线
+        setTimeout(() => {
+            resizeOverlay();
+            clearVerticalLine();
+        }, 100);
     }
 
     // ========== 加载点击日期的持仓快照 ==========
     function loadSnapshot(date) {
         if (!currentStrategyId) return;
-        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/holdings?date=' + date)
+        const priceType = document.getElementById('navPriceType').value;
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/holdings?date=' + date + '&price_type=' + priceType)
             .then(res => res.json())
             .then(data => {
                 if (data.error) {
-                    alert('获取持仓快照失败: ' + data.error);
+                    console.warn('获取持仓快照失败: ' + data.error);
                     return;
                 }
                 document.getElementById('snapshotPanel').style.display = 'block';
@@ -371,11 +519,13 @@
                         const row = holdingsTbody.insertRow();
                         row.insertCell().innerText = h.stock_code;
                         row.insertCell().innerText = h.quantity;
-                        row.insertCell().innerText = h.price ? h.price.toFixed(2) : '-';
-                        row.insertCell().innerText = h.market_value ? h.market_value.toFixed(2) : '-';
+                        row.insertCell().innerText = h.open_price ? h.open_price.toFixed(2) : '-';
+                        row.insertCell().innerText = h.open_market_value ? h.open_market_value.toFixed(2) : '-';
+                        row.insertCell().innerText = h.close_price ? h.close_price.toFixed(2) : '-';
+                        row.insertCell().innerText = h.close_market_value ? h.close_market_value.toFixed(2) : '-';
                     });
                 } else {
-                    holdingsTbody.innerHTML = '<tr><td colspan="4">无持仓</td></tr>';
+                    holdingsTbody.innerHTML = '<tr><td colspan="6">无持仓</td></tr>';
                 }
 
                 // 填充预购股表格
