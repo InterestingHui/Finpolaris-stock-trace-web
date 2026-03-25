@@ -46,6 +46,7 @@
     "stocks": [
       {
         "stock_code": "000001.SZ",
+        "stock_id": 1,
         "action": "buy",
         "quantity": 1000,
         "date": "2026-03-06"
@@ -59,6 +60,7 @@
     "stocks": [
       {
         "stock_code": "000001.SZ",
+        "stock_id": 1,
         "action": "buy",
         "quantity": 1000,
         "date": "2026-03-06"
@@ -106,7 +108,6 @@
                 <th>开盘市值</th>
                 <th>收盘价</th>
                 <th>收盘市值</th>
-            </tr>
             </thead>
             <tbody></tbody>
         </table>
@@ -114,6 +115,7 @@
         <table id="pendingTable">
             <thead>
             <tr>
+                <th>操作ID</th>
                 <th>股票代码</th>
                 <th>操作</th>
                 <th>数量</th>
@@ -130,6 +132,7 @@
         <table id="logsTable">
             <thead>
             <tr>
+                <th>操作ID</th>
                 <th>意图日期</th>
                 <th>实际日期</th>
                 <th>股票代码</th>
@@ -138,6 +141,7 @@
                 <th>价格</th>
                 <th>状态</th>
                 <th>原因</th>
+                <th>操作</th>
             </tr>
             </thead>
             <tbody></tbody>
@@ -146,7 +150,7 @@
 </div>
 
 <script>
-    const BASE_URL = '__BACKEND_URL__';  // 根据你的Flask实际端口调整
+    const BASE_URL = 'http://localhost:5000';  // 占位符，部署时替换
 
     let navChart = null;
     let currentStrategyId = null;
@@ -528,13 +532,14 @@
                     holdingsTbody.innerHTML = '<tr><td colspan="6">无持仓</td></tr>';
                 }
 
-                // 填充预购股表格
+                // 填充预购股表格（包含操作ID）
                 const pendingTbody = document.querySelector('#pendingTable tbody');
                 pendingTbody.innerHTML = '';
                 if (data.pending_orders && data.pending_orders.length > 0) {
                     document.getElementById('pendingDate').innerText = data.pending_orders[0].target_date;
                     data.pending_orders.forEach(p => {
                         const row = pendingTbody.insertRow();
+                        row.insertCell().innerText = p.stock_id;
                         row.insertCell().innerText = p.stock_code;
                         row.insertCell().innerText = p.action;
                         row.insertCell().innerText = p.quantity;
@@ -542,7 +547,7 @@
                     });
                 } else {
                     document.getElementById('pendingDate').innerText = '';
-                    pendingTbody.innerHTML = '<tr><td colspan="4">无预购股</td></tr>';
+                    pendingTbody.innerHTML = '<tr><td colspan="5">无预购股</td></tr>';
                 }
             })
             .catch(err => console.error('获取持仓快照失败', err));
@@ -561,11 +566,12 @@
                 const tbody = document.querySelector('#logsTable tbody');
                 tbody.innerHTML = '';
                 if (!Array.isArray(data) || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8">暂无交易日志</td></tr>';
+                    tbody.innerHTML = '.<td colspan="10">暂无交易日志</td>';
                     return;
                 }
                 data.forEach(log => {
                     const row = tbody.insertRow();
+                    row.insertCell().innerText = log.stock_id || '';
                     row.insertCell().innerText = log.intended_date || '';
                     row.insertCell().innerText = log.actual_date || '-';
                     row.insertCell().innerText = log.stock_code || '';
@@ -583,10 +589,44 @@
                     row.insertCell().innerHTML = `<span class="status-badge ${statusClass}">${status}</span>`;
 
                     row.insertCell().innerText = log.fail_reason || '-';
+
+                    // 新增操作列：若状态为 pending，显示撤销按钮
+                    const actionCell = row.insertCell();
+                    if (status === 'pending') {
+                        const cancelBtn = document.createElement('button');
+                        cancelBtn.innerText = '撤销';
+                        cancelBtn.className = 'btn-danger';
+                        cancelBtn.style.padding = '2px 8px';
+                        cancelBtn.style.fontSize = '12px';
+                        cancelBtn.onclick = () => cancelTrade(log.stock_id);
+                        actionCell.appendChild(cancelBtn);
+                    } else {
+                        actionCell.innerText = '-';
+                    }
                 });
             })
             .catch(err => console.error('获取交易日志失败', err));
     }
+
+    function cancelTrade(stockId) {
+        if (!currentStrategyId) return;
+        if (!confirm(`确定要撤销操作ID ${stockId} 的交易吗？`)) return;
+
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/trades/' + stockId, {
+            method: 'DELETE'
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert('撤销失败: ' + data.error);
+                } else {
+                    alert('撤销成功');
+                    loadTradeLogs();  // 刷新交易日志
+                }
+            })
+            .catch(err => alert('请求失败: ' + err));
+    }
+
 </script>
 </body>
 </html>
