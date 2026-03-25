@@ -29,6 +29,7 @@
         .status-success { background: #d4edda; color: #155724; }
         .status-failed { background: #f8d7da; color: #721c24; }
         .status-pending { background: #fff3cd; color: #856404; }
+        .batch-detail { font-size: 12px; color: #666; max-width: 200px; word-wrap: break-word; }
     </style>
 </head>
 <body>
@@ -46,6 +47,7 @@
     "stocks": [
       {
         "stock_code": "000001.SZ",
+        "stock_id": 1,
         "action": "buy",
         "quantity": 1000,
         "date": "2026-03-06"
@@ -59,6 +61,7 @@
     "stocks": [
       {
         "stock_code": "000001.SZ",
+        "stock_id": 1,
         "action": "buy",
         "quantity": 1000,
         "date": "2026-03-06"
@@ -106,7 +109,7 @@
                 <th>开盘市值</th>
                 <th>收盘价</th>
                 <th>收盘市值</th>
-            </tr>
+                <th>批次明细(剩余股,持有天数)</th>
             </thead>
             <tbody></tbody>
         </table>
@@ -114,11 +117,11 @@
         <table id="pendingTable">
             <thead>
             <tr>
+                <th>操作ID</th>
                 <th>股票代码</th>
                 <th>操作</th>
                 <th>数量</th>
                 <th>意图日期</th>
-            </tr>
             </thead>
             <tbody></tbody>
         </table>
@@ -130,6 +133,7 @@
         <table id="logsTable">
             <thead>
             <tr>
+                <th>操作ID</th>
                 <th>意图日期</th>
                 <th>实际日期</th>
                 <th>股票代码</th>
@@ -138,7 +142,7 @@
                 <th>价格</th>
                 <th>状态</th>
                 <th>原因</th>
-            </tr>
+                <th>操作</th>
             </thead>
             <tbody></tbody>
         </table>
@@ -146,15 +150,14 @@
 </div>
 
 <script>
-    const BASE_URL = '__BACKEND_URL__';  // 根据你的Flask实际端口调整
+    const BASE_URL = '__BACKEND_URL__';  // 占位符，部署时替换
 
     let navChart = null;
     let currentStrategyId = null;
-    let currentChartLabels = []; // 保存当前图表的横坐标标签
-    let currentNavValues = [];    // 保存净值金额
-    let currentIndexValues = [];   // 保存沪深300指数值
+    let currentChartLabels = [];
+    let currentNavValues = [];
+    let currentIndexValues = [];
 
-    // 用于绘制垂直虚线的变量
     let overlayCanvas = null;
     let overlayCtx = null;
     let lastX = null;
@@ -162,23 +165,19 @@
 
     window.onload = function() {
         refreshStrategyList();
-        // 获取 canvas 元素
         overlayCanvas = document.getElementById('overlayCanvas');
         overlayCtx = overlayCanvas.getContext('2d');
-        // 设置点击区域的事件
         const clickOverlay = document.getElementById('clickOverlay');
         clickOverlay.addEventListener('click', (e) => {
             if (!navChart || !currentChartLabels.length) return;
             const rect = clickOverlay.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            // 找到最近的横坐标点
             const { index } = getNearestPoint(x, y);
             if (index >= 0 && index < currentChartLabels.length) {
                 loadSnapshot(currentChartLabels[index]);
             }
         });
-        // 鼠标移动时绘制虚线
         clickOverlay.addEventListener('mousemove', (e) => {
             if (!navChart || !currentChartLabels.length) return;
             const rect = clickOverlay.getBoundingClientRect();
@@ -192,18 +191,14 @@
         });
     };
 
-    // 获取鼠标位置最近的横坐标点信息
     function getNearestPoint(clickX, clickY) {
         if (!navChart || !currentChartLabels.length) return { index: -1, xPos: 0 };
-        const chartArea = navChart.chartArea;
         const xAxis = navChart.scales.x;
-        // 计算每个标签的x坐标
         const labelPositions = [];
         for (let i = 0; i < currentChartLabels.length; i++) {
             const xPos = xAxis.getPixelForValue(i);
             labelPositions.push({ index: i, x: xPos });
         }
-        // 找到离 clickX 最近的标签
         let nearest = null;
         let minDist = Infinity;
         for (let pos of labelPositions) {
@@ -216,7 +211,6 @@
         return { index: nearest.index, xPos: nearest.x };
     }
 
-    // 绘制垂直虚线
     function drawVerticalLine(x) {
         if (!overlayCanvas || !overlayCtx) return;
         if (x === lastX) return;
@@ -246,7 +240,6 @@
         lastX = null;
     }
 
-    // 调整 overlayCanvas 尺寸与图表 canvas 一致
     function resizeOverlay() {
         const chartCanvas = document.getElementById('navChartCanvas');
         if (chartCanvas && overlayCanvas) {
@@ -277,7 +270,6 @@
     function onStrategyChange() {
         const strategyId = document.getElementById('strategySelect').value;
         if (!strategyId) {
-            // 清空图表和快照面板
             if (navChart) navChart.destroy();
             navChart = null;
             document.getElementById('currentNav').innerHTML = '';
@@ -290,7 +282,6 @@
             return;
         }
         currentStrategyId = strategyId;
-        // 清空快照面板
         document.getElementById('snapshotPanel').style.display = 'none';
         loadStrategyNav();
         loadTradeLogs();
@@ -365,7 +356,6 @@
 
         const priceType = document.getElementById('navPriceType').value;
 
-        // 请求当前净值时传递 price_type
         fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/current_nav?price_type=' + priceType)
             .then(res => res.json())
             .then(data => {
@@ -486,7 +476,6 @@
             }
         });
 
-        // 图表绘制完成后调整 overlayCanvas 尺寸并清除虚线
         setTimeout(() => {
             resizeOverlay();
             clearVerticalLine();
@@ -511,7 +500,7 @@
                 document.getElementById('snapshotNav').innerText = data.nav ? data.nav.toFixed(2) : '-';
                 document.getElementById('snapshotPercent').innerText = data.nav_percent ? data.nav_percent.toFixed(2) : '-';
 
-                // 填充持仓表格
+                // 填充持仓表格（含批次明细）
                 const holdingsTbody = document.querySelector('#snapshotTable tbody');
                 holdingsTbody.innerHTML = '';
                 if (data.holdings && data.holdings.length > 0) {
@@ -523,9 +512,17 @@
                         row.insertCell().innerText = h.open_market_value ? h.open_market_value.toFixed(2) : '-';
                         row.insertCell().innerText = h.close_price ? h.close_price.toFixed(2) : '-';
                         row.insertCell().innerText = h.close_market_value ? h.close_market_value.toFixed(2) : '-';
+                        // 批次明细
+                        let batchText = '';
+                        if (h.batches && h.batches.length > 0) {
+                            batchText = h.batches.map(b => `${b[0]},${b[1]}天`).join('; ');
+                        } else {
+                            batchText = '-';
+                        }
+                        row.insertCell().innerHTML = `<span class="batch-detail">${batchText}</span>`;
                     });
                 } else {
-                    holdingsTbody.innerHTML = '<tr><td colspan="6">无持仓</td></tr>';
+                    holdingsTbody.innerHTML = '.<td colspan="7">无持仓</td>';
                 }
 
                 // 填充预购股表格
@@ -535,6 +532,7 @@
                     document.getElementById('pendingDate').innerText = data.pending_orders[0].target_date;
                     data.pending_orders.forEach(p => {
                         const row = pendingTbody.insertRow();
+                        row.insertCell().innerText = p.stock_id;
                         row.insertCell().innerText = p.stock_code;
                         row.insertCell().innerText = p.action;
                         row.insertCell().innerText = p.quantity;
@@ -542,7 +540,7 @@
                     });
                 } else {
                     document.getElementById('pendingDate').innerText = '';
-                    pendingTbody.innerHTML = '<tr><td colspan="4">无预购股</td></tr>';
+                    pendingTbody.innerHTML = '.<td colspan="5">无预购股</td>';
                 }
             })
             .catch(err => console.error('获取持仓快照失败', err));
@@ -561,11 +559,12 @@
                 const tbody = document.querySelector('#logsTable tbody');
                 tbody.innerHTML = '';
                 if (!Array.isArray(data) || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8">暂无交易日志</td></tr>';
+                    tbody.innerHTML = '.<td colspan="10">暂无交易日志</td>';
                     return;
                 }
                 data.forEach(log => {
                     const row = tbody.insertRow();
+                    row.insertCell().innerText = log.stock_id || '';
                     row.insertCell().innerText = log.intended_date || '';
                     row.insertCell().innerText = log.actual_date || '-';
                     row.insertCell().innerText = log.stock_code || '';
@@ -583,9 +582,43 @@
                     row.insertCell().innerHTML = `<span class="status-badge ${statusClass}">${status}</span>`;
 
                     row.insertCell().innerText = log.fail_reason || '-';
+
+                    // 操作列：只有 pending 状态才显示撤销按钮
+                    const actionCell = row.insertCell();
+                    if (status === 'pending') {
+                        const cancelBtn = document.createElement('button');
+                        cancelBtn.innerText = '撤销';
+                        cancelBtn.className = 'btn-danger';
+                        cancelBtn.style.padding = '2px 8px';
+                        cancelBtn.style.fontSize = '12px';
+                        cancelBtn.onclick = () => cancelTrade(log.stock_id);
+                        actionCell.appendChild(cancelBtn);
+                    } else {
+                        actionCell.innerText = '-';
+                    }
                 });
             })
             .catch(err => console.error('获取交易日志失败', err));
+    }
+
+    // ========== 撤销交易 ==========
+    function cancelTrade(stockId) {
+        if (!currentStrategyId) return;
+        if (!confirm(`确定要撤销操作ID ${stockId} 的交易吗？`)) return;
+
+        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/trades/' + stockId, {
+            method: 'DELETE'
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert('撤销失败: ' + data.error);
+                } else {
+                    alert('撤销成功');
+                    loadTradeLogs();  // 刷新交易日志
+                }
+            })
+            .catch(err => alert('请求失败: ' + err));
     }
 </script>
 </body>
