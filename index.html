@@ -108,6 +108,7 @@
                 <th>开盘市值</th>
                 <th>收盘价</th>
                 <th>收盘市值</th>
+            </tr>
             </thead>
             <tbody></tbody>
         </table>
@@ -150,15 +151,14 @@
 </div>
 
 <script>
-    const BASE_URL = 'http://localhost:5000';  // 占位符，部署时替换
+    const BASE_URL = '__BACKEND_URL__';  // 占位符，部署时替换
 
     let navChart = null;
     let currentStrategyId = null;
-    let currentChartLabels = []; // 保存当前图表的横坐标标签
-    let currentNavValues = [];    // 保存净值金额
-    let currentIndexValues = [];   // 保存沪深300指数值
+    let currentChartLabels = [];
+    let currentNavValues = [];
+    let currentIndexValues = [];
 
-    // 用于绘制垂直虚线的变量
     let overlayCanvas = null;
     let overlayCtx = null;
     let lastX = null;
@@ -166,23 +166,19 @@
 
     window.onload = function() {
         refreshStrategyList();
-        // 获取 canvas 元素
         overlayCanvas = document.getElementById('overlayCanvas');
         overlayCtx = overlayCanvas.getContext('2d');
-        // 设置点击区域的事件
         const clickOverlay = document.getElementById('clickOverlay');
         clickOverlay.addEventListener('click', (e) => {
             if (!navChart || !currentChartLabels.length) return;
             const rect = clickOverlay.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            // 找到最近的横坐标点
             const { index } = getNearestPoint(x, y);
             if (index >= 0 && index < currentChartLabels.length) {
                 loadSnapshot(currentChartLabels[index]);
             }
         });
-        // 鼠标移动时绘制虚线
         clickOverlay.addEventListener('mousemove', (e) => {
             if (!navChart || !currentChartLabels.length) return;
             const rect = clickOverlay.getBoundingClientRect();
@@ -196,18 +192,14 @@
         });
     };
 
-    // 获取鼠标位置最近的横坐标点信息
     function getNearestPoint(clickX, clickY) {
         if (!navChart || !currentChartLabels.length) return { index: -1, xPos: 0 };
-        const chartArea = navChart.chartArea;
         const xAxis = navChart.scales.x;
-        // 计算每个标签的x坐标
         const labelPositions = [];
         for (let i = 0; i < currentChartLabels.length; i++) {
             const xPos = xAxis.getPixelForValue(i);
             labelPositions.push({ index: i, x: xPos });
         }
-        // 找到离 clickX 最近的标签
         let nearest = null;
         let minDist = Infinity;
         for (let pos of labelPositions) {
@@ -220,7 +212,6 @@
         return { index: nearest.index, xPos: nearest.x };
     }
 
-    // 绘制垂直虚线
     function drawVerticalLine(x) {
         if (!overlayCanvas || !overlayCtx) return;
         if (x === lastX) return;
@@ -250,7 +241,6 @@
         lastX = null;
     }
 
-    // 调整 overlayCanvas 尺寸与图表 canvas 一致
     function resizeOverlay() {
         const chartCanvas = document.getElementById('navChartCanvas');
         if (chartCanvas && overlayCanvas) {
@@ -281,7 +271,6 @@
     function onStrategyChange() {
         const strategyId = document.getElementById('strategySelect').value;
         if (!strategyId) {
-            // 清空图表和快照面板
             if (navChart) navChart.destroy();
             navChart = null;
             document.getElementById('currentNav').innerHTML = '';
@@ -294,7 +283,6 @@
             return;
         }
         currentStrategyId = strategyId;
-        // 清空快照面板
         document.getElementById('snapshotPanel').style.display = 'none';
         loadStrategyNav();
         loadTradeLogs();
@@ -369,7 +357,6 @@
 
         const priceType = document.getElementById('navPriceType').value;
 
-        // 请求当前净值时传递 price_type
         fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/current_nav?price_type=' + priceType)
             .then(res => res.json())
             .then(data => {
@@ -490,7 +477,6 @@
             }
         });
 
-        // 图表绘制完成后调整 overlayCanvas 尺寸并清除虚线
         setTimeout(() => {
             resizeOverlay();
             clearVerticalLine();
@@ -515,7 +501,6 @@
                 document.getElementById('snapshotNav').innerText = data.nav ? data.nav.toFixed(2) : '-';
                 document.getElementById('snapshotPercent').innerText = data.nav_percent ? data.nav_percent.toFixed(2) : '-';
 
-                // 填充持仓表格
                 const holdingsTbody = document.querySelector('#snapshotTable tbody');
                 holdingsTbody.innerHTML = '';
                 if (data.holdings && data.holdings.length > 0) {
@@ -529,10 +514,9 @@
                         row.insertCell().innerText = h.close_market_value ? h.close_market_value.toFixed(2) : '-';
                     });
                 } else {
-                    holdingsTbody.innerHTML = '<tr><td colspan="6">无持仓</td></tr>';
+                    holdingsTbody.innerHTML = '.<td colspan="6">无持仓</td>';
                 }
 
-                // 填充预购股表格（包含操作ID）
                 const pendingTbody = document.querySelector('#pendingTable tbody');
                 pendingTbody.innerHTML = '';
                 if (data.pending_orders && data.pending_orders.length > 0) {
@@ -547,13 +531,13 @@
                     });
                 } else {
                     document.getElementById('pendingDate').innerText = '';
-                    pendingTbody.innerHTML = '<tr><td colspan="5">无预购股</td></tr>';
+                    pendingTbody.innerHTML = '.<td colspan="5">无预购股</td>';
                 }
             })
             .catch(err => console.error('获取持仓快照失败', err));
     }
 
-    // ========== 加载交易日志 ==========
+    // ========== 加载交易日志（含撤销按钮） ==========
     function loadTradeLogs() {
         if (!currentStrategyId) return;
         fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/logs')
@@ -590,7 +574,7 @@
 
                     row.insertCell().innerText = log.fail_reason || '-';
 
-                    // 新增操作列：若状态为 pending，显示撤销按钮
+                    // 操作列：若状态为 pending，显示撤销按钮
                     const actionCell = row.insertCell();
                     if (status === 'pending') {
                         const cancelBtn = document.createElement('button');
@@ -626,7 +610,6 @@
             })
             .catch(err => alert('请求失败: ' + err));
     }
-
 </script>
 </body>
 </html>
