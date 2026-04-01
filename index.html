@@ -87,7 +87,6 @@
             </select>
             <button onclick="refreshStrategyList()">刷新列表</button>
             <button class="btn-danger" onclick="deleteSelectedStrategy()">删除策略</button>
-            <button onclick="loadCurrentHoldings()">实时持仓</button>
         </div>
         <div id="currentNav" style="margin-top:10px;"></div>
         <div id="chartContainer">
@@ -112,7 +111,6 @@
                 <th>收盘价</th>
                 <th>收盘市值</th>
                 <th>批次明细(剩余股,持有天数)</th>
-            </tr>
             </thead>
             <tbody></tbody>
         </table>
@@ -123,17 +121,11 @@
         </table>
     </div>
 
-    <!-- 实时持仓 -->
-    <div class="card" id="currentHoldingsPanel" style="display:none;">
-        <h3>实时持仓</h3>
-        <table id="currentHoldingsTable"><thead><tr><th>股票代码</th><th>股数</th></tr></thead><tbody></tbody></table>
-    </div>
-
-    <!-- 交易日志（含详细行情） -->
+    <!-- 交易日志（精简列） -->
     <div class="card">
         <h2>交易日志</h2>
         <div style="margin-bottom:10px;">
-            <label for="logDateFilter">按日期筛选 (意图日期): </label>
+            <label for="logDateFilter">按意图日期筛选: </label>
             <input type="date" id="logDateFilter">
             <button onclick="loadTradeLogsWithFilter()">查询</button>
             <button onclick="loadTradeLogs(true)">清除筛选</button>
@@ -154,12 +146,6 @@
                     <th>收盘</th>
                     <th>最高</th>
                     <th>最低</th>
-                    <th>成交量(手)</th>
-                    <th>成交额(元)</th>
-                    <th>振幅(%)</th>
-                    <th>涨跌幅(%)</th>
-                    <th>涨跌额</th>
-                    <th>换手率(%)</th>
                     <th>状态</th>
                     <th>失败原因</th>
                     <th>操作</th>
@@ -213,8 +199,20 @@
         });
     };
 
+    // 改进的 getNearestPoint 函数，使用 Chart.js 内置方法获取精确位置
     function getNearestPoint(clickX, clickY) {
         if (!navChart || !currentChartLabels.length) return { index: -1, xPos: 0 };
+
+        // 使用 Chart.js 的 getElementsAtEventForMode 方法
+        const elements = navChart.getElementsAtEventForMode({ x: clickX, y: clickY }, 'index', { intersect: false }, true);
+
+        if (elements.length > 0) {
+            const element = elements[0];
+            const xPos = navChart.scales.x.getPixelForValue(element.index);
+            return { index: element.index, xPos: xPos };
+        }
+
+        // 如果没有找到元素，使用原来的逻辑作为备选
         const xAxis = navChart.scales.x;
         const labelPositions = [];
         for (let i = 0; i < currentChartLabels.length; i++) {
@@ -230,7 +228,7 @@
                 nearest = pos;
             }
         }
-        return { index: nearest.index, xPos: nearest.x };
+        return { index: nearest?.index ?? -1, xPos: nearest?.x ?? 0 };
     }
 
     function drawVerticalLine(x) {
@@ -296,7 +294,6 @@
             navChart = null;
             document.getElementById('currentNav').innerHTML = '';
             document.getElementById('snapshotPanel').style.display = 'none';
-            document.getElementById('currentHoldingsPanel').style.display = 'none';
             document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
             currentChartLabels = [];
             currentNavValues = [];
@@ -306,7 +303,6 @@
         }
         currentStrategyId = strategyId;
         document.getElementById('snapshotPanel').style.display = 'none';
-        document.getElementById('currentHoldingsPanel').style.display = 'none';
         loadStrategyNav();
         loadTradeLogs(true);
     }
@@ -360,7 +356,6 @@
                     navChart = null;
                     document.getElementById('currentNav').innerHTML = '';
                     document.getElementById('snapshotPanel').style.display = 'none';
-                    document.getElementById('currentHoldingsPanel').style.display = 'none';
                     document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
                     currentChartLabels = [];
                     currentNavValues = [];
@@ -369,32 +364,6 @@
                 }
             })
             .catch(err => alert('请求失败: ' + err));
-    }
-
-    function loadCurrentHoldings() {
-        if (!currentStrategyId) return;
-        fetch(BASE_URL + '/api/strategies/' + currentStrategyId + '/current_holdings')
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) {
-                    alert('获取实时持仓失败: ' + data.error);
-                    return;
-                }
-                const panel = document.getElementById('currentHoldingsPanel');
-                panel.style.display = 'block';
-                const tbody = document.querySelector('#currentHoldingsTable tbody');
-                tbody.innerHTML = '';
-                if (!Array.isArray(data) || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="2">暂无持仓</td></tr>';
-                    return;
-                }
-                data.forEach(h => {
-                    const row = tbody.insertRow();
-                    row.insertCell().innerText = h.stock_code;
-                    row.insertCell().innerText = h.quantity;
-                });
-            })
-            .catch(err => console.error('获取实时持仓失败', err));
     }
 
     function loadStrategyNav() {
@@ -466,6 +435,8 @@
                 scales: { y: { beginAtZero: false, title: { display: true, text: '百分比 (%)' } } },
                 plugins: {
                     tooltip: {
+                        mode: 'index',
+                        intersect: false,
                         callbacks: {
                             label: function(context) {
                                 let label = context.dataset.label || '';
@@ -552,7 +523,7 @@
                 const tbody = document.querySelector('#logsTable tbody');
                 tbody.innerHTML = '';
                 if (!Array.isArray(data) || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="21">暂无交易日志</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="15">暂无交易日志</td></tr>';
                     return;
                 }
                 data.forEach(log => {
@@ -562,20 +533,21 @@
                     row.insertCell().innerText = log.stock_code || '';
                     row.insertCell().innerText = log.action || '';
                     row.insertCell().innerText = log.quantity || '';
-                    row.insertCell().innerText = log.intended_date || '';
-                    row.insertCell().innerText = log.actual_date || '-';
+
+                    // 格式化意图日期
+                    const intendedDate = log.intended_date ? formatDate(log.intended_date) : '';
+                    row.insertCell().innerText = intendedDate;
+
+                    // 格式化实际日期
+                    const actualDate = log.actual_date ? formatDate(log.actual_date) : '-';
+                    row.insertCell().innerText = actualDate;
+
                     const price = parseFloat(log.price);
                     row.insertCell().innerText = isNaN(price) ? '-' : price.toFixed(2);
                     row.insertCell().innerText = log.open_price ? parseFloat(log.open_price).toFixed(2) : '-';
                     row.insertCell().innerText = log.close_price ? parseFloat(log.close_price).toFixed(2) : '-';
                     row.insertCell().innerText = log.high_price ? parseFloat(log.high_price).toFixed(2) : '-';
                     row.insertCell().innerText = log.low_price ? parseFloat(log.low_price).toFixed(2) : '-';
-                    row.insertCell().innerText = log.volume || '-';
-                    row.insertCell().innerText = log.amount ? parseFloat(log.amount).toFixed(2) : '-';
-                    row.insertCell().innerText = log.amplitude ? parseFloat(log.amplitude).toFixed(2) : '-';
-                    row.insertCell().innerText = log.pct_chg ? parseFloat(log.pct_chg).toFixed(2) : '-';
-                    row.insertCell().innerText = log.change_amount ? parseFloat(log.change_amount).toFixed(2) : '-';
-                    row.insertCell().innerText = log.turnover_rate ? parseFloat(log.turnover_rate).toFixed(2) : '-';
                     const status = log.status || '';
                     let statusClass = '';
                     if (status === 'success') statusClass = 'status-success';
@@ -598,6 +570,23 @@
                 });
             })
             .catch(err => console.error('获取交易日志失败', err));
+    }
+
+    // 日期格式化辅助函数
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        // 如果已经是 YYYY-MM-DD 格式，直接返回
+        if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            return dateStr;
+        }
+        // 处理其他可能的日期格式
+        try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return dateStr;
+            return date.toISOString().split('T')[0];
+        } catch (e) {
+            return dateStr;
+        }
     }
 
     function loadTradeLogsWithFilter() { loadTradeLogs(false); }
