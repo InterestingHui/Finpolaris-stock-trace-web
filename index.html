@@ -85,6 +85,14 @@
                 <option value="open">开盘价</option>
                 <option value="close">收盘价</option>
             </select>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <label>📊 对比指数:</label>
+                <select id="indexSelect" multiple size="2" style="height: auto; min-width: 120px;" onchange="loadStrategyNav()">
+                    <option value="sh000300" selected>沪深300</option>
+                    <option value="sh000852">中证1000</option>
+                </select>
+                <span style="font-size: 0.8em; color: #666;">(Ctrl+点击多选)</span>
+            </div>
             <button onclick="refreshStrategyList()">刷新列表</button>
             <button class="btn-danger" onclick="deleteSelectedStrategy()">删除策略</button>
         </div>
@@ -189,13 +197,12 @@
 </div>
 
 <script>
-    const BASE_URL = '__BACKEND_URL__';  // 占位符，部署时替换
+    const BASE_URL = 'http://localhost:5000';  // 占位符，部署时替换
 
     let navChart = null;
     let currentStrategyId = null;
     let currentChartLabels = [];
     let currentNavValues = [];
-    let currentIndexValues = [];
 
     let overlayCanvas = null;
     let overlayCtx = null;
@@ -228,22 +235,25 @@
         clickOverlay.addEventListener('mouseleave', () => {
             clearVerticalLine();
         });
+        setDefaultReturnsDateRange();
     };
 
-    // 改进的 getNearestPoint 函数，使用 Chart.js 内置方法获取精确位置
+    function setDefaultReturnsDateRange() {
+        const end = new Date();
+        const start = new Date();
+        start.setMonth(start.getMonth() - 1);
+        document.getElementById('returnsStartDate').value = start.toISOString().split('T')[0];
+        document.getElementById('returnsEndDate').value = end.toISOString().split('T')[0];
+    }
+
     function getNearestPoint(clickX, clickY) {
         if (!navChart || !currentChartLabels.length) return { index: -1, xPos: 0 };
-
-        // 使用 Chart.js 的 getElementsAtEventForMode 方法
         const elements = navChart.getElementsAtEventForMode({ x: clickX, y: clickY }, 'index', { intersect: false }, true);
-
         if (elements.length > 0) {
             const element = elements[0];
             const xPos = navChart.scales.x.getPixelForValue(element.index);
             return { index: element.index, xPos: xPos };
         }
-
-        // 如果没有找到元素，使用原来的逻辑作为备选
         const xAxis = navChart.scales.x;
         const labelPositions = [];
         for (let i = 0; i < currentChartLabels.length; i++) {
@@ -301,7 +311,6 @@
         }
     }
 
-    // ========== 策略管理 ==========
     function refreshStrategyList() {
         fetch(BASE_URL + '/api/strategies')
             .then(res => res.json())
@@ -326,9 +335,9 @@
             document.getElementById('currentNav').innerHTML = '';
             document.getElementById('snapshotPanel').style.display = 'none';
             document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
+            document.getElementById('returnsTable').querySelector('tbody').innerHTML = '';
             currentChartLabels = [];
             currentNavValues = [];
-            currentIndexValues = [];
             clearVerticalLine();
             return;
         }
@@ -336,6 +345,7 @@
         document.getElementById('snapshotPanel').style.display = 'none';
         loadStrategyNav();
         loadTradeLogs(true);
+        loadReturnsData();
     }
 
     function submitStrategies() {
@@ -388,9 +398,9 @@
                     document.getElementById('currentNav').innerHTML = '';
                     document.getElementById('snapshotPanel').style.display = 'none';
                     document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
+                    document.getElementById('returnsTable').querySelector('tbody').innerHTML = '';
                     currentChartLabels = [];
                     currentNavValues = [];
-                    currentIndexValues = [];
                     clearVerticalLine();
                 }
             })
@@ -425,38 +435,70 @@
                 currentNavValues = navValues;
                 const startDate = navDates[0];
                 const endDate = navDates[navDates.length - 1];
-                fetch(BASE_URL + '/api/index/sh000300?start_date=' + startDate + '&end_date=' + endDate + '&price_type=' + priceType)
-                    .then(res => res.json())
-                    .then(indexData => {
-                        if (indexData.error) {
-                            drawChart(navDates, navPercents, [], navValues, []);
-                        } else {
-                            const indexMap = new Map();
-                            const indexValuesMap = new Map();
-                            indexData.forEach(item => {
-                                indexMap.set(item.date, item.percent_change);
-                                indexValuesMap.set(item.date, item.value);
-                            });
-                            const indexPercents = navDates.map(date => indexMap.get(date) || null);
-                            const indexValues = navDates.map(date => indexValuesMap.get(date) || null);
-                            currentIndexValues = indexValues;
-                            drawChart(navDates, navPercents, indexPercents, navValues, indexValues);
-                        }
-                    })
-                    .catch(err => drawChart(navDates, navPercents, [], navValues, []));
+
+                const indexSelect = document.getElementById('indexSelect');
+                const selectedIndices = Array.from(indexSelect.selectedOptions).map(opt => opt.value);
+
+                if (selectedIndices.length === 0) {
+                    drawChart(navDates, navPercents, [], navValues, []);
+                    return;
+                }
+
+                const indexPromises = selectedIndices.map(indexCode => {
+                    return fetch(`${BASE_URL}/api/index/${indexCode}?start_date=${startDate}&end_date=${endDate}&price_type=${priceType}`)
+                        .then(res => res.json())
+                        .then(indexData => {
+                            if (indexData.error) return null;
+                            return { code: indexCode, data: indexData };
+                        })
+                        .catch(() => null);
+                });
+
+                Promise.all(indexPromises).then(results => {
+                    const indexDatasets = [];
+                    const combinedIndexValues = [];
+
+                    results.forEach(result => {
+                        if (!result || !result.data) return;
+                        const indexMap = new Map();
+                        const valuesMap = new Map();
+                        result.data.forEach(item => {
+                            indexMap.set(item.date, item.percent_change);
+                            valuesMap.set(item.date, item.value);
+                        });
+                        const percents = navDates.map(date => indexMap.get(date) || null);
+                        const values = navDates.map(date => valuesMap.get(date) || null);
+                        let label = result.code === 'sh000300' ? '沪深300' : '中证1000';
+                        let color = result.code === 'sh000300' ? 'green' : 'orange';
+                        indexDatasets.push({
+                            label: label + ' (%)',
+                            data: percents,
+                            borderColor: color,
+                            backgroundColor: 'transparent',
+                            yAxisID: 'y',
+                            tension: 0.1
+                        });
+                        combinedIndexValues.push({ code: result.code, values: values });
+                    });
+
+                    drawChart(navDates, navPercents, indexDatasets, navValues, combinedIndexValues);
+                });
             })
             .catch(err => console.error('净值请求失败', err));
     }
 
-    function drawChart(labels, strategyData, indexData, navValues, indexValues) {
+    function drawChart(labels, strategyData, indexDatasets, navValues, combinedIndexValues) {
         if (navChart) navChart.destroy();
         const ctx = document.getElementById('navChartCanvas').getContext('2d');
+
         const datasets = [
             { label: '策略净值 (%)', data: strategyData, borderColor: 'blue', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.1 }
         ];
-        if (indexData.length > 0) {
-            datasets.push({ label: '沪深300 (%)', data: indexData, borderColor: 'green', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.1 });
+
+        if (indexDatasets && indexDatasets.length > 0) {
+            datasets.push(...indexDatasets);
         }
+
         navChart = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets },
@@ -474,12 +516,22 @@
                                 if (label) label += ': ';
                                 if (context.raw !== null && context.raw !== undefined) {
                                     label += context.raw.toFixed(2) + '%';
+                                    const idx = context.dataIndex;
                                     if (context.dataset.label === '策略净值 (%)') {
-                                        const idx = context.dataIndex;
-                                        if (navValues && navValues[idx]) label += ` (净值: ${navValues[idx].toFixed(2)})`;
-                                    } else if (context.dataset.label === '沪深300 (%)') {
-                                        const idx = context.dataIndex;
-                                        if (indexValues && indexValues[idx]) label += ` (指数: ${indexValues[idx].toFixed(2)})`;
+                                        if (navValues && navValues[idx]) {
+                                            label += ` (净值: ${navValues[idx].toFixed(2)})`;
+                                        }
+                                    } else {
+                                        const datasetLabel = context.dataset.label;
+                                        let indexCode = null;
+                                        if (datasetLabel.includes('沪深300')) indexCode = 'sh000300';
+                                        else if (datasetLabel.includes('中证1000')) indexCode = 'sh000852';
+                                        if (indexCode && combinedIndexValues) {
+                                            const indexValueObj = combinedIndexValues.find(item => item.code === indexCode);
+                                            if (indexValueObj && indexValueObj.values && indexValueObj.values[idx]) {
+                                                label += ` (指数: ${indexValueObj.values[idx].toFixed(2)})`;
+                                            }
+                                        }
                                     }
                                 }
                                 return label;
@@ -564,15 +616,10 @@
                     row.insertCell().innerText = log.stock_code || '';
                     row.insertCell().innerText = log.action || '';
                     row.insertCell().innerText = log.quantity || '';
-
-                    // 格式化意图日期
                     const intendedDate = log.intended_date ? formatDate(log.intended_date) : '';
                     row.insertCell().innerText = intendedDate;
-
-                    // 格式化实际日期
                     const actualDate = log.actual_date ? formatDate(log.actual_date) : '-';
                     row.insertCell().innerText = actualDate;
-
                     const price = parseFloat(log.price);
                     row.insertCell().innerText = isNaN(price) ? '-' : price.toFixed(2);
                     row.insertCell().innerText = log.open_price ? parseFloat(log.open_price).toFixed(2) : '-';
@@ -603,14 +650,11 @@
             .catch(err => console.error('获取交易日志失败', err));
     }
 
-    // 日期格式化辅助函数
     function formatDate(dateStr) {
         if (!dateStr) return '';
-        // 如果已经是 YYYY-MM-DD 格式，直接返回
         if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
             return dateStr;
         }
-        // 处理其他可能的日期格式
         try {
             const date = new Date(dateStr);
             if (isNaN(date.getTime())) return dateStr;
@@ -634,12 +678,8 @@
             .catch(err => alert('请求失败: ' + err));
     }
 
-    // 加载回报数据
     function loadReturnsData() {
-        if (!currentStrategyId) {
-            alert('请先选择一个策略');
-            return;
-        }
+        if (!currentStrategyId) return;
         const startDate = document.getElementById('returnsStartDate').value;
         const endDate = document.getElementById('returnsEndDate').value;
         if (!startDate || !endDate) {
@@ -672,12 +712,10 @@
 
         data.forEach(row => {
             const tr = document.createElement('tr');
-            // 日期
             const tdDate = document.createElement('td');
             tdDate.textContent = row.date;
             tr.appendChild(tdDate);
 
-            // 交易组构成（可折叠）
             const tdComp = document.createElement('td');
             tdComp.style.cursor = 'pointer';
             tdComp.style.color = '#007bff';
@@ -697,7 +735,6 @@
             });
             tr.appendChild(tdComp);
 
-            // 数值字段
             const fields = [
                 'holding_sum',
                 'Holding_Size_Mean',
@@ -715,13 +752,11 @@
                 if (val !== null && val !== undefined) {
                     if (field.includes('Return') || field === 'turnover') {
                         td.textContent = val.toFixed(2) + '%';
-                        // 根据正负设置颜色
                         if (val > 0) td.style.color = 'red';
                         else if (val < 0) td.style.color = 'green';
                     } else if (field === 'holding_sum') {
                         td.textContent = val;
                     } else {
-                        // 市值显示为万元或亿元更友好
                         if (val >= 1e8) {
                             td.textContent = (val / 1e8).toFixed(2) + '亿';
                         } else if (val >= 1e4) {
@@ -738,7 +773,6 @@
             tbody.appendChild(tr);
         });
     }
-
 </script>
 </body>
 </html>
