@@ -121,6 +121,37 @@
         </table>
     </div>
 
+    <!-- 策略回报分析 -->
+    <div class="card">
+        <h2>📈 策略回报分析</h2>
+        <div style="margin-bottom:10px; display: flex; gap: 10px; align-items: center;">
+            <label>开始日期: <input type="date" id="returnsStartDate"></label>
+            <label>结束日期: <input type="date" id="returnsEndDate"></label>
+            <button onclick="loadReturnsData()">查询</button>
+            <span style="margin-left: auto; font-size: 0.9em; color: #666;">💡 鼠标悬停表头查看字段说明</span>
+        </div>
+        <div style="overflow-x: auto;">
+            <table id="returnsTable">
+                <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>交易组构成 (点击展开)</th>
+                    <th title="该组买入股票的总股数">holding_sum</th>
+                    <th title="加权平均总市值（元） = Σ(个股买入金额 × 个股市值) / 总买入金额">Holding_Size_Mean</th>
+                    <th title="个股总市值的中位数（元）">Holding_Size_Median</th>
+                    <th title="持有1个交易日收益率 = (T+1收盘市值 / 成本 - 1) × 100%">T1_Return (%)</th>
+                    <th title="持有2个交易日收益率">T2_Return (%)</th>
+                    <th title="持有3个交易日收益率">T3_Return (%)</th>
+                    <th title="持有4个交易日收益率">T4_Return (%)</th>
+                    <th title="持有5个交易日收益率">T5_Return (%)</th>
+                    <th title="换手率 = 买入总金额 / 前一交易日收盘净值 × 100%">turnover (%)</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- 交易日志（精简列） -->
     <div class="card">
         <h2>交易日志</h2>
@@ -602,6 +633,112 @@
             })
             .catch(err => alert('请求失败: ' + err));
     }
+
+    // 加载回报数据
+    function loadReturnsData() {
+        if (!currentStrategyId) {
+            alert('请先选择一个策略');
+            return;
+        }
+        const startDate = document.getElementById('returnsStartDate').value;
+        const endDate = document.getElementById('returnsEndDate').value;
+        if (!startDate || !endDate) {
+            alert('请选择开始和结束日期');
+            return;
+        }
+        const url = `${BASE_URL}/api/strategies/${currentStrategyId}/returns?start_date=${startDate}&end_date=${endDate}`;
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert('获取回报数据失败: ' + data.error);
+                    return;
+                }
+                renderReturnsTable(data);
+            })
+            .catch(err => {
+                console.error('获取回报数据失败', err);
+                alert('请求失败，请检查网络');
+            });
+    }
+
+    function renderReturnsTable(data) {
+        const tbody = document.querySelector('#returnsTable tbody');
+        tbody.innerHTML = '';
+        if (!Array.isArray(data) || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="11">暂无数据</td></tr>';
+            return;
+        }
+
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            // 日期
+            const tdDate = document.createElement('td');
+            tdDate.textContent = row.date;
+            tr.appendChild(tdDate);
+
+            // 交易组构成（可折叠）
+            const tdComp = document.createElement('td');
+            tdComp.style.cursor = 'pointer';
+            tdComp.style.color = '#007bff';
+            tdComp.textContent = '▶ ' + (row.composition ? row.composition.substring(0, 20) + '…' : '无');
+            tdComp.dataset.expanded = 'false';
+            tdComp.dataset.fullText = row.composition || '';
+            tdComp.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const expanded = this.dataset.expanded === 'true';
+                if (expanded) {
+                    this.textContent = '▶ ' + (row.composition ? row.composition.substring(0, 20) + '…' : '无');
+                    this.dataset.expanded = 'false';
+                } else {
+                    this.textContent = '▼ ' + (row.composition || '无');
+                    this.dataset.expanded = 'true';
+                }
+            });
+            tr.appendChild(tdComp);
+
+            // 数值字段
+            const fields = [
+                'holding_sum',
+                'Holding_Size_Mean',
+                'Holding_Size_Median',
+                'T1_Return',
+                'T2_Return',
+                'T3_Return',
+                'T4_Return',
+                'T5_Return',
+                'turnover'
+            ];
+            fields.forEach(field => {
+                const td = document.createElement('td');
+                let val = row[field];
+                if (val !== null && val !== undefined) {
+                    if (field.includes('Return') || field === 'turnover') {
+                        td.textContent = val.toFixed(2) + '%';
+                        // 根据正负设置颜色
+                        if (val > 0) td.style.color = 'red';
+                        else if (val < 0) td.style.color = 'green';
+                    } else if (field === 'holding_sum') {
+                        td.textContent = val;
+                    } else {
+                        // 市值显示为万元或亿元更友好
+                        if (val >= 1e8) {
+                            td.textContent = (val / 1e8).toFixed(2) + '亿';
+                        } else if (val >= 1e4) {
+                            td.textContent = (val / 1e4).toFixed(2) + '万';
+                        } else {
+                            td.textContent = val.toFixed(2);
+                        }
+                    }
+                } else {
+                    td.textContent = '-';
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+    }
+
 </script>
 </body>
 </html>
