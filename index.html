@@ -83,13 +83,13 @@
             </select>
             <select id="navPriceType" onchange="loadStrategyNav()">
                 <option value="open">开盘价</option>
-                <option value="close">收盘价</option>
+                <option value="close" selected>收盘价</option>
             </select>
             <div style="display: flex; align-items: center; gap: 5px;">
                 <label>📊 对比指数:</label>
                 <select id="indexSelect" multiple size="2" style="height: auto; min-width: 120px;" onchange="loadStrategyNav()">
                     <option value="sh000300" selected>沪深300</option>
-                    <option value="sh000852">中证1000</option>
+                    <option value="sh000852" selected>中证1000</option>
                 </select>
                 <span style="font-size: 0.8em; color: #666;">(Ctrl+点击多选)</span>
             </div>
@@ -147,6 +147,7 @@
                     <th title="该组买入股票的总股数">holding_sum</th>
                     <th title="加权平均总市值（元） = Σ(个股买入金额 × 个股市值) / 总买入金额">Holding_Size_Mean</th>
                     <th title="个股总市值的中位数（元）">Holding_Size_Median</th>
+                    <th title="当日收益率 = (买入当日收盘市值 / 成本 - 1) × 100%">T0_Return (%)</th>
                     <th title="持有1个交易日收益率 = (T+1收盘市值 / 成本 - 1) × 100%">T1_Return (%)</th>
                     <th title="持有2个交易日收益率">T2_Return (%)</th>
                     <th title="持有3个交易日收益率">T3_Return (%)</th>
@@ -317,12 +318,19 @@
             .then(data => {
                 const select = document.getElementById('strategySelect');
                 select.innerHTML = '<option value="">-- 请选择 --</option>';
+                // 排序
+                data.sort();
                 data.forEach(sid => {
                     const opt = document.createElement('option');
                     opt.value = sid;
                     opt.text = sid;
                     select.appendChild(opt);
                 });
+                // 如果有策略，自动选中第一个
+                if (data.length > 0) {
+                    select.value = data[0];
+                    onStrategyChange();
+                }
             })
             .catch(err => console.error('获取策略列表失败', err));
     }
@@ -364,10 +372,6 @@
                     } else {
                         document.getElementById('submitResult').innerHTML = `<span class="success">提交成功</span>`;
                         refreshStrategyList();
-                        const select = document.getElementById('strategySelect');
-                        if (select.value === data[0]?.strategy_id) {
-                            loadTradeLogs(true);
-                        }
                     }
                 })
                 .catch(err => {
@@ -392,16 +396,6 @@
                 else {
                     alert('删除成功');
                     refreshStrategyList();
-                    document.getElementById('strategySelect').value = '';
-                    if (navChart) navChart.destroy();
-                    navChart = null;
-                    document.getElementById('currentNav').innerHTML = '';
-                    document.getElementById('snapshotPanel').style.display = 'none';
-                    document.getElementById('logsTable').querySelector('tbody').innerHTML = '';
-                    document.getElementById('returnsTable').querySelector('tbody').innerHTML = '';
-                    currentChartLabels = [];
-                    currentNavValues = [];
-                    clearVerticalLine();
                 }
             })
             .catch(err => alert('请求失败: ' + err));
@@ -706,7 +700,7 @@
         const tbody = document.querySelector('#returnsTable tbody');
         tbody.innerHTML = '';
         if (!Array.isArray(data) || data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="11">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12">暂无数据</td></tr>';
             return;
         }
 
@@ -739,6 +733,7 @@
                 'holding_sum',
                 'Holding_Size_Mean',
                 'Holding_Size_Median',
+                'T0_Return',
                 'T1_Return',
                 'T2_Return',
                 'T3_Return',
