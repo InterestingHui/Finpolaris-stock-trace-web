@@ -319,10 +319,13 @@
     }
 
     function refreshStrategyList() {
+        // 保存当前选中的策略ID
+        const select = document.getElementById('strategySelect');
+        const savedStrategyId = select.value;
+
         fetch(BASE_URL + '/api/strategies')
             .then(res => res.json())
             .then(data => {
-                const select = document.getElementById('strategySelect');
                 select.innerHTML = '<option value="">-- 请选择 --</option>';
                 // 排序
                 data.sort();
@@ -332,9 +335,17 @@
                     opt.text = sid;
                     select.appendChild(opt);
                 });
-                // 如果有策略，自动选中第一个
-                if (data.length > 0) {
+
+                // 尝试恢复之前选中的策略
+                if (savedStrategyId && data.includes(savedStrategyId)) {
+                    select.value = savedStrategyId;
+                    onStrategyChange();
+                } else if (data.length > 0) {
+                    // 只有之前选中的策略不存在时，才选中第一个
                     select.value = data[0];
+                    onStrategyChange();
+                } else {
+                    // 没有策略时，清空界面
                     onStrategyChange();
                 }
             })
