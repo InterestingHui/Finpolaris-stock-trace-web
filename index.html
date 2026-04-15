@@ -786,6 +786,9 @@
             return;
         }
 
+        // 按日期由近及远排序
+        data.reverse();
+
         data.forEach(row => {
             const tr = document.createElement('tr');
             const tdDate = document.createElement('td');
